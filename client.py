@@ -84,12 +84,12 @@ class EmailClient:
         if self.imap:
             try:
                 self.imap.logout()
-            except:
+            except Exception:
                 pass
         if self.smtp:
             try:
                 self.smtp.quit()
-            except:
+            except Exception:
                 pass
     
     # --- Receiving emails ---
@@ -342,7 +342,7 @@ class POP3Client(EmailClient):
         if self.pop:
             try:
                 self.pop.quit()
-            except:
+            except Exception:
                 pass
     
     def _fetch_pop_message(self, msg_num: int) -> Optional[EmailMessage]:
@@ -360,7 +360,7 @@ class POP3Client(EmailClient):
                 body=msg.get_payload() or "",
                 date=datetime.now()
             )
-        except:
+        except Exception:
             return None
 
 

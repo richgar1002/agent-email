@@ -37,7 +37,7 @@ class LLMReply:
             self.ollama_available = response.status_code == 200
             if self.ollama_available:
                 logger.info("Ollama available for auto-replies")
-        except:
+        except (requests.RequestException, ConnectionError, TimeoutError):
             logger.info("Ollama not available, using templates")
     
     def generate_reply(
