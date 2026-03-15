@@ -1,6 +1,6 @@
 """
-Decentralized Email API
-REST API for AI agents to manage email
+Enhanced Email API
+Complete REST API with memory, webhooks, and LLM
 """
 from fastapi import FastAPI, HTTPException, Depends, Header
 from pydantic import BaseModel
@@ -8,15 +8,20 @@ from typing import Optional, List
 from datetime import datetime
 import os
 
-from client import create_email_client, EmailMessage
+from enhanced_client import EnhancedEmailClient, create_enhanced_email_client
+from webhook_manager import EmailTrigger
 
-app = FastAPI(title="Agent Email API")
+app = FastAPI(title="Agent Email API - Enhanced")
 
 # Config
-SMTP_HOST = os.getenv("SMTP_HOST", "localhost")
-IMAP_HOST = os.getenv("IMAP_HOST", "localhost")
+SMTP_HOST = os.getenv("SMTP_HOST", "live.smtp.mailtrap.io")
+IMAP_HOST = os.getenv("IMAP_HOST", "live.imap.mailtrap.io")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
+
+# Storage
+DATA_DIR = "/tmp/email_data"
+os.makedirs(DATA_DIR, exist_ok=True)
 
 # Simple in-memory storage for multiple accounts
 accounts = {}
@@ -37,6 +42,7 @@ class CreateAccountRequest(BaseModel):
     imap_host: Optional[str] = None
     smtp_port: Optional[int] = 587
     imap_port: Optional[int] = 993
+    user_id: Optional[str] = None
 
 class SendEmailRequest(BaseModel):
     from_addr: Optional[str] = None
@@ -46,10 +52,25 @@ class SendEmailRequest(BaseModel):
     html: bool = False
 
 class WebhookRequest(BaseModel):
+    name: str
     url: str
-    events: List[str] = ["new_email"]
+    trigger_type: str
+    trigger_value: str
+    auto_reply: bool = False
+    reply_template: Optional[str] = None
 
-# Accounts
+class AutoReplyRequest(BaseModel):
+    tone: str = "professional"
+    context: Optional[str] = None
+
+class GenerateReplyRequest(BaseModel):
+    from_addr: str
+    subject: str
+    body: str
+    tone: str = "professional"
+    context: Optional[str] = None
+
+# === ACCOUNTS ===
 
 @app.post("/accounts")
 async def create_account(
@@ -66,6 +87,7 @@ async def create_account(
         "imap_host": request.imap_host or IMAP_HOST,
         "smtp_port": request.smtp_port,
         "imap_port": request.imap_port,
+        "user_id": request.user_id or request.username,
         "created_at": datetime.now().isoformat()
     }
     
@@ -85,14 +107,15 @@ async def get_account(
     
     account = accounts[account_id]
     
-    # Try to connect and get inbox status
     try:
-        client = create_email_client(
+        client = create_enhanced_email_client(
             hostname=account["imap_host"],
             username=account["username"],
             password=account["password"],
-            imap_port=account["imap_port"]
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
         )
+        
         inbox = client.get_inbox()
         client.disconnect()
         
@@ -123,7 +146,7 @@ async def delete_account(
     del accounts[account_id]
     return {"status": "deleted", "account_id": account_id}
 
-# Messages
+# === MESSAGES ===
 
 @app.get("/accounts/{account_id}/messages")
 async def get_messages(
@@ -140,11 +163,12 @@ async def get_messages(
     account = accounts[account_id]
     
     try:
-        client = create_email_client(
+        client = create_enhanced_email_client(
             hostname=account["imap_host"],
             username=account["username"],
             password=account["password"],
-            imap_port=account["imap_port"]
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
         )
         
         messages = client.get_messages(folder=folder, limit=limit, unread_only=unread_only)
@@ -181,11 +205,12 @@ async def get_message(
     account = accounts[account_id]
     
     try:
-        client = create_email_client(
+        client = create_enhanced_email_client(
             hostname=account["imap_host"],
             username=account["username"],
             password=account["password"],
-            imap_port=account["imap_port"]
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
         )
         
         message = client.get_message(msg_id)
@@ -208,7 +233,7 @@ async def get_message(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Send
+# === SEND ===
 
 @app.post("/accounts/{account_id}/send")
 async def send_email(
@@ -223,11 +248,12 @@ async def send_email(
     account = accounts[account_id]
     
     try:
-        client = create_email_client(
+        client = create_enhanced_email_client(
             hostname=account["smtp_host"],
             username=account["username"],
             password=account["password"],
-            smtp_port=account["smtp_port"]
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
         )
         
         result = client.send(
@@ -246,7 +272,7 @@ async def send_email(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Actions
+# === ACTIONS ===
 
 @app.post("/accounts/{account_id}/messages/{msg_id}/read")
 async def mark_read(
@@ -261,11 +287,12 @@ async def mark_read(
     account = accounts[account_id]
     
     try:
-        client = create_email_client(
+        client = create_enhanced_email_client(
             hostname=account["imap_host"],
             username=account["username"],
             password=account["password"],
-            imap_port=account["imap_port"]
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
         )
         
         client.mark_as_read(msg_id)
@@ -288,11 +315,12 @@ async def delete_message(
     account = accounts[account_id]
     
     try:
-        client = create_email_client(
+        client = create_enhanced_email_client(
             hostname=account["imap_host"],
             username=account["username"],
             password=account["password"],
-            imap_port=account["imap_port"]
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
         )
         
         client.delete_message(msg_id)
@@ -302,14 +330,333 @@ async def delete_message(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Health
+# === MEMORY ===
+
+@app.post("/accounts/{account_id}/memory/save")
+async def save_to_memory(
+    account_id: str,
+    msg_id: str = None,
+    auth: bool = Depends(verify_api_key)
+):
+    """Save email to memory"""
+    if account_id not in accounts:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    account = accounts[account_id]
+    
+    try:
+        client = create_enhanced_email_client(
+            hostname=account["imap_host"],
+            username=account["username"],
+            password=account["password"],
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
+        )
+        
+        result = client.save_to_memory(msg_id=msg_id)
+        client.disconnect()
+        
+        return {"status": "ok", "saved": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/accounts/{account_id}/memory/search")
+async def search_memory(
+    account_id: str,
+    query: str,
+    limit: int = 10,
+    auth: bool = Depends(verify_api_key)
+):
+    """Search saved emails"""
+    if account_id not in accounts:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    account = accounts[account_id]
+    
+    try:
+        client = create_enhanced_email_client(
+            hostname=account["imap_host"],
+            username=account["username"],
+            password=account["password"],
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
+        )
+        
+        results = client.search_memory(query, limit)
+        client.disconnect()
+        
+        return {"results": results, "count": len(results)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/accounts/{account_id}/memory/emails")
+async def get_saved_emails(
+    account_id: str,
+    limit: int = 20,
+    auth: bool = Depends(verify_api_key)
+):
+    """Get all saved emails"""
+    if account_id not in accounts:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    account = accounts[account_id]
+    
+    try:
+        client = create_enhanced_email_client(
+            hostname=account["imap_host"],
+            username=account["username"],
+            password=account["password"],
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
+        )
+        
+        emails = client.get_saved_emails(limit)
+        client.disconnect()
+        
+        return {"emails": emails, "count": len(emails)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# === LLM AUTO-REPLY ===
+
+@app.post("/accounts/{account_id}/reply/generate")
+async def generate_reply(
+    account_id: str,
+    request: GenerateReplyRequest,
+    auth: bool = Depends(verify_api_key)
+):
+    """Generate AI reply"""
+    if account_id not in accounts:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    account = accounts[account_id]
+    
+    try:
+        client = create_enhanced_email_client(
+            hostname=account["imap_host"],
+            username=account["username"],
+            password=account["password"],
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
+        )
+        
+        result = client.generate_reply(
+            original_subject=request.subject,
+            original_body=request.body,
+            from_addr=request.from_addr,
+            context=request.context,
+            tone=request.tone
+        )
+        client.disconnect()
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/accounts/{account_id}/reply/auto")
+async def send_auto_reply(
+    account_id: str,
+    msg_id: str,
+    request: AutoReplyRequest,
+    auth: bool = Depends(verify_api_key)
+):
+    """Send auto-reply to message"""
+    if account_id not in accounts:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    account = accounts[account_id]
+    
+    try:
+        client = create_enhanced_email_client(
+            hostname=account["imap_host"],
+            username=account["username"],
+            password=account["password"],
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
+        )
+        
+        result = client.send_auto_reply(
+            original_msg_id=msg_id,
+            tone=request.tone,
+            context=request.context
+        )
+        client.disconnect()
+        
+        return {"status": "sent" if result else "failed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/accounts/{account_id}/summarize/{msg_id}")
+async def summarize_email(
+    account_id: str,
+    msg_id: str,
+    auth: bool = Depends(verify_api_key)
+):
+    """Summarize an email"""
+    if account_id not in accounts:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    account = accounts[account_id]
+    
+    try:
+        client = create_enhanced_email_client(
+            hostname=account["imap_host"],
+            username=account["username"],
+            password=account["password"],
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
+        )
+        
+        summary = client.summarize_email(msg_id=msg_id)
+        actions = client.suggest_actions(msg_id=msg_id)
+        client.disconnect()
+        
+        return {"summary": summary, "suggested_actions": actions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# === WEBHOOKS ===
+
+@app.get("/accounts/{account_id}/webhooks")
+async def list_webhooks(
+    account_id: str,
+    auth: bool = Depends(verify_api_key)
+):
+    """List webhooks"""
+    if account_id not in accounts:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    account = accounts[account_id]
+    
+    try:
+        client = create_enhanced_email_client(
+            hostname=account["imap_host"],
+            username=account["username"],
+            password=account["password"],
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
+        )
+        
+        webhooks = client.list_webhooks()
+        client.disconnect()
+        
+        return {"webhooks": [w.to_dict() for w in webhooks]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/accounts/{account_id}/webhooks")
+async def create_webhook(
+    account_id: str,
+    request: WebhookRequest,
+    auth: bool = Depends(verify_api_key)
+):
+    """Create webhook"""
+    if account_id not in accounts:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    account = accounts[account_id]
+    
+    try:
+        client = create_enhanced_email_client(
+            hostname=account["imap_host"],
+            username=account["username"],
+            password=account["password"],
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
+        )
+        
+        webhook = client.create_webhook(
+            name=request.name,
+            url=request.url,
+            trigger_type=EmailTrigger(request.trigger_type),
+            trigger_value=request.trigger_value,
+            auto_reply=request.auto_reply,
+            reply_template=request.reply_template
+        )
+        client.disconnect()
+        
+        return webhook.to_dict()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/accounts/{account_id}/webhooks/{webhook_id}")
+async def delete_webhook(
+    account_id: str,
+    webhook_id: str,
+    auth: bool = Depends(verify_api_key)
+):
+    """Delete webhook"""
+    if account_id not in accounts:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    account = accounts[account_id]
+    
+    try:
+        client = create_enhanced_email_client(
+            hostname=account["imap_host"],
+            username=account["username"],
+            password=account["password"],
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
+        )
+        
+        result = client.delete_webhook(webhook_id)
+        client.disconnect()
+        
+        return {"status": "deleted" if result else "not_found"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/accounts/{account_id}/webhooks/logs")
+async def get_webhook_logs(
+    account_id: str,
+    webhook_id: str = None,
+    limit: int = 50,
+    auth: bool = Depends(verify_api_key)
+):
+    """Get webhook logs"""
+    if account_id not in accounts:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    account = accounts[account_id]
+    
+    try:
+        client = create_enhanced_email_client(
+            hostname=account["imap_host"],
+            username=account["username"],
+            password=account["password"],
+            user_id=account.get("user_id"),
+            storage_path=DATA_DIR
+        )
+        
+        logs = client.get_webhook_logs(webhook_id, limit)
+        client.disconnect()
+        
+        return {"logs": [
+            {
+                "webhook_id": l.webhook_id,
+                "event": l.event.value,
+                "success": l.success,
+                "timestamp": l.timestamp
+            }
+            for l in logs
+        ]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# === HEALTH ===
 
 @app.get("/health")
 async def health():
     """Health check"""
     return {
         "status": "healthy",
-        "accounts": len(accounts)
+        "accounts": len(accounts),
+        "features": {
+            "memory": True,
+            "webhooks": True,
+            "llm_reply": True
+        }
     }
 
 if __name__ == "__main__":

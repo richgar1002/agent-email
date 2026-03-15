@@ -4,6 +4,20 @@
 
 ---
 
+## Beta Features
+
+| Feature | Status |
+|---------|--------|
+| IMAP/SMTP | ✅ |
+| REST API | ✅ |
+| Multiple accounts | ✅ |
+| Send/receive | ✅ |
+| **Memory Integration** | ✅ NEW |
+| **Webhooks** | ✅ NEW |
+| **LLM Auto-Reply** | ✅ NEW |
+
+---
+
 ## The Problem
 
 | Cloud Email Services | The Decentralized Solution |
@@ -14,22 +28,7 @@
 | Vendor lock-in | Full control |
 | Rate limits | Your server, your rules |
 
-## Why Decentralized?
-
-### 🔒 Privacy
-- Emails never leave your infrastructure
-- No third-party data processing
-- GDPR/HIPAA compliant by design
-
-### 💰 Cost
-- No per-email pricing
-- One VPS = unlimited inboxes
-- For power users: much cheaper than cloud
-
-### 🛡️ Control
-- Full server control
-- Custom configurations
-- No downtime due to vendor issues
+---
 
 ## Quick Start
 
@@ -60,7 +59,8 @@ curl -X POST http://localhost:8002/accounts \
   -d '{
     "username": "trading-bot",
     "password": "secure-password",
-    "smtp_host": "mail.yourdomain.com"
+    "smtp_host": "live.smtp.mailtrap.io",
+    "imap_host": "live.imap.mailtrap.io"
   }'
 ```
 
@@ -81,32 +81,120 @@ curl -X POST http://localhost:8002/accounts/trading-bot/send \
   }'
 ```
 
+## New: Memory Integration
+
+Save emails to memory bridge:
+
+```bash
+# Save email to memory
+curl -X POST http://localhost:8002/accounts/trading-bot/memory/save \
+  -H "Authorization: Bearer YOUR-API-KEY" \
+  -d '{"msg_id": "123"}'
+
+# Search saved emails
+curl "http://localhost:8002/accounts/trading-bot/memory/search?query=trading" \
+  -H "Authorization: Bearer YOUR-API-KEY"
+```
+
+## New: Webhooks
+
+Trigger actions on incoming emails:
+
+```bash
+# Create webhook
+curl -X POST http://localhost:8002/accounts/trading-bot/webhooks \
+  -H "Authorization: Bearer YOUR-API-KEY" \
+  -d '{
+    "name": "Trade Alerts",
+    "url": "https://your-server.com/webhook",
+    "trigger_type": "subject_matches",
+    "trigger_value": "trade"
+  }'
+```
+
+### Trigger Types
+- `new_email` - Any new email
+- `from_address` - From specific address
+- `subject_matches` - Subject contains text
+- `body_contains` - Body contains text
+
+## New: LLM Auto-Reply
+
+AI-powered email responses:
+
+```bash
+# Generate reply
+curl -X POST http://localhost:8002/accounts/trading-bot/reply/generate \
+  -H "Authorization: Bearer YOUR-API-KEY" \
+  -d '{
+    "from_addr": "client@example.com",
+    "subject": "Question about trading",
+    "body": "What are the best pairs for scalping?",
+    "tone": "professional"
+  }'
+
+# Send auto-reply
+curl -X POST http://localhost:8002/accounts/trading-bot/reply/auto/123 \
+  -H "Authorization: Bearer YOUR-API-KEY" \
+  -d '{"tone": "professional"}'
+```
+
+### Tones
+- `professional` - Formal business style
+- `casual` - Friendly, relaxed
+- `brief` - Short and to the point
+
 ## Python SDK
 
 ```python
-from client import create_email_client
+from enhanced_client import create_enhanced_email_client
 
 # Connect
-email = create_email_client(
+email = create_enhanced_email_client(
     hostname="mail.yourdomain.com",
     username="trading-bot@yourdomain.com",
-    password="secure-password"
+    password="secure-password",
+    user_id="trading"
 )
 
 # Get messages
 messages = email.get_messages(limit=10)
-for msg in messages:
-    print(f"From: {msg.from_addr}")
-    print(f"Subject: {msg.subject}")
-    print(f"Body: {msg.body[:100]}...")
 
-# Send email
-email.send(
-    to_addr="client@example.com",
-    subject="Trading Update",
-    body="EURUSD closed at 1.0850 (+$45.20)"
+# Save to memory
+email.save_to_memory(msg_id="123")
+
+# Generate AI reply
+result = email.generate_reply(
+    original_subject="Question",
+    original_body="What's the best strategy?",
+    from_addr="client@example.com",
+    tone="professional"
 )
+print(result['reply'])
+
+# Send auto-reply
+email.send_auto_reply(msg_id="123", tone="professional")
+
+# Summarize email
+summary = email.summarize_email(msg_id="123")
+print(summary)
 ```
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/accounts` | Create account |
+| GET | `/accounts/{id}` | Get account |
+| GET | `/accounts/{id}/messages` | List messages |
+| POST | `/accounts/{id}/send` | Send email |
+| POST | `/accounts/{id}/memory/save` | Save to memory |
+| GET | `/accounts/{id}/memory/search` | Search memory |
+| POST | `/accounts/{id}/reply/generate` | Generate reply |
+| POST | `/accounts/{id}/reply/auto` | Send auto-reply |
+| GET | `/accounts/{id}/summarize/{msg_id}` | Summarize |
+| POST | `/accounts/{id}/webhooks` | Create webhook |
+| GET | `/accounts/{id}/webhooks` | List webhooks |
 
 ## Architecture
 
@@ -127,60 +215,21 @@ email.send(
 │           │  (port 8002)  │                    │
 │           └───────┬───────┘                    │
 │                   │                            │
-│           ┌───────▼───────┐                    │
-│           │   Your Agent  │                    │
-│           │   (Browser,   │                    │
-│           │   Memory)     │                    │
-│           └───────────────┘                    │
-│                                                  │
+│    ┌──────────────┼──────────────┐            │
+│    ▼              ▼              ▼            │
+│ ┌──────┐   ┌──────────┐   ┌──────────┐     │
+│ │Memory│◀──│  Webhooks │──▶│   LLM    │     │
+│ │Bridge│   │           │   │  Auto-   │     │
+│ └──────┘   └──────────┘   │  Reply   │     │
+│                             └──────────┘     │
 └─────────────────────────────────────────────────┘
 ```
 
-## Docker Deployment (Coming Soon)
-
-```yaml
-# docker-compose.yml
-version: '3'
-services:
-  email-api:
-    image: agent-email
-    ports:
-      - "8002:8002"
-    env_file:
-      - .env
-```
-
-## Features
-
-### Core
-- IMAP/SMTP support
-- REST API
-- Multiple accounts
-- Attachments
-
-### AI Integration
-- Send/receive via API
-- Agent SDK
-- Memory integration (coming)
-- Auto-reply with LLM (coming)
-
-### Security
-- API key auth
-- TLS encryption
-- DKIM ready
-- Full audit logs (coming)
-
-## Pricing
-
-| Model | Price | Who |
-|-------|-------|-----|
-| **Open Source** | $0 | Self-hosters |
-| **Managed Install** | $99 one-time | Want help |
-| **VPS + Support** | $15/mo | Fully managed |
+---
 
 ## Status
 
-**MVP Ready** ✅
+**Beta Ready** ✅
 
 Features implemented:
 - ✅ IMAP client
@@ -189,14 +238,10 @@ Features implemented:
 - ✅ Python SDK
 - ✅ Multiple accounts
 - ✅ Send/receive emails
+- ✅ Memory integration
+- ✅ Webhooks
+- ✅ LLM auto-reply
 
-Coming soon:
-- 🔄 Webhooks
-- 🔄 DKIM signing
-- 🔄 Spam filtering
-- 🔄 Memory integration
-- 🔄 LLM auto-reply
+---
 
-## License
-
-MIT
+**License:** MIT
