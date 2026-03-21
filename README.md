@@ -1,247 +1,110 @@
-# 🕵️ AgentMail Decentralized
-
-**Privacy-first email for AI agents. Self-hosted. No cloud.**
-
----
-
-## Beta Features
-
-| Feature | Status |
-|---------|--------|
-| IMAP/SMTP | ✅ |
-| REST API | ✅ |
-| Multiple accounts | ✅ |
-| Send/receive | ✅ |
-| **Memory Integration** | ✅ NEW |
-| **Webhooks** | ✅ NEW |
-| **LLM Auto-Reply** | ✅ NEW |
-
----
-
-## The Problem
-
-| Cloud Email Services | The Decentralized Solution |
-|---------------------|--------------------------|
-| Your data on their servers | Data stays on your VPS |
-| Monthly subscription | One VPS cost |
-| Privacy concerns | Complete data sovereignty |
-| Vendor lock-in | Full control |
-| Rate limits | Your server, your rules |
-
----
+# Agent Email Platform
 
 ## Quick Start
 
-```bash
-# Install
-pip install -r requirements.txt
-
-# Run API
-python api.py
-```
-
-## Configuration
-
-```env
-# .env file
-API_KEY=your-secret-key
-SMTP_HOST=mail.yourdomain.com
-IMAP_HOST=mail.yourdomain.com
-DEFAULT_DOMAIN=yourdomain.com
-```
-
-## API Usage
-
-### Create Account
-```bash
-curl -X POST http://localhost:8002/accounts \
-  -H "Authorization: Bearer YOUR-API-KEY" \
-  -d '{
-    "username": "trading-bot",
-    "password": "secure-password",
-    "smtp_host": "live.smtp.mailtrap.io",
-    "imap_host": "live.imap.mailtrap.io"
-  }'
-```
-
-### Get Messages
-```bash
-curl http://localhost:8002/accounts/trading-bot/messages \
-  -H "Authorization: Bearer YOUR-API-KEY"
-```
-
-### Send Email
-```bash
-curl -X POST http://localhost:8002/accounts/trading-bot/send \
-  -H "Authorization: Bearer YOUR-API-KEY" \
-  -d '{
-    "to_addr": "client@example.com",
-    "subject": "Update",
-    "body": "Your trade closed at profit."
-  }'
-```
-
-## New: Memory Integration
-
-Save emails to memory bridge:
+### 1. Run Migration
 
 ```bash
-# Save email to memory
-curl -X POST http://localhost:8002/accounts/trading-bot/memory/save \
-  -H "Authorization: Bearer YOUR-API-KEY" \
-  -d '{"msg_id": "123"}'
-
-# Search saved emails
-curl "http://localhost:8002/accounts/trading-bot/memory/search?query=trading" \
-  -H "Authorization: Bearer YOUR-API-KEY"
+psql $DATABASE_URL -f migrations/001_init.sql
 ```
 
-## New: Webhooks
-
-Trigger actions on incoming emails:
+### 2. Set Environment
 
 ```bash
-# Create webhook
-curl -X POST http://localhost:8002/accounts/trading-bot/webhooks \
-  -H "Authorization: Bearer YOUR-API-KEY" \
-  -d '{
-    "name": "Trade Alerts",
-    "url": "https://your-server.com/webhook",
-    "trigger_type": "subject_matches",
-    "trigger_value": "trade"
-  }'
+export DATABASE_URL="postgresql://user:pass@localhost:5432/agent_email"
+export API_KEY="your-api-key"
 ```
 
-### Trigger Types
-- `new_email` - Any new email
-- `from_address` - From specific address
-- `subject_matches` - Subject contains text
-- `body_contains` - Body contains text
-
-## New: LLM Auto-Reply
-
-AI-powered email responses:
+### 3. Run the Server
 
 ```bash
-# Generate reply
-curl -X POST http://localhost:8002/accounts/trading-bot/reply/generate \
-  -H "Authorization: Bearer YOUR-API-KEY" \
-  -d '{
-    "from_addr": "client@example.com",
-    "subject": "Question about trading",
-    "body": "What are the best pairs for scalping?",
-    "tone": "professional"
-  }'
-
-# Send auto-reply
-curl -X POST http://localhost:8002/accounts/trading-bot/reply/auto/123 \
-  -H "Authorization: Bearer YOUR-API-KEY" \
-  -d '{"tone": "professional"}'
+python -m app.main
 ```
-
-### Tones
-- `professional` - Formal business style
-- `casual` - Friendly, relaxed
-- `brief` - Short and to the point
-
-## Python SDK
-
-```python
-from enhanced_client import create_enhanced_email_client
-
-# Connect
-email = create_enhanced_email_client(
-    hostname="mail.yourdomain.com",
-    username="trading-bot@yourdomain.com",
-    password="secure-password",
-    user_id="trading"
-)
-
-# Get messages
-messages = email.get_messages(limit=10)
-
-# Save to memory
-email.save_to_memory(msg_id="123")
-
-# Generate AI reply
-result = email.generate_reply(
-    original_subject="Question",
-    original_body="What's the best strategy?",
-    from_addr="client@example.com",
-    tone="professional"
-)
-print(result['reply'])
-
-# Send auto-reply
-email.send_auto_reply(msg_id="123", tone="professional")
-
-# Summarize email
-summary = email.summarize_email(msg_id="123")
-print(summary)
-```
-
-## API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/accounts` | Create account |
-| GET | `/accounts/{id}` | Get account |
-| GET | `/accounts/{id}/messages` | List messages |
-| POST | `/accounts/{id}/send` | Send email |
-| POST | `/accounts/{id}/memory/save` | Save to memory |
-| GET | `/accounts/{id}/memory/search` | Search memory |
-| POST | `/accounts/{id}/reply/generate` | Generate reply |
-| POST | `/accounts/{id}/reply/auto` | Send auto-reply |
-| GET | `/accounts/{id}/summarize/{msg_id}` | Summarize |
-| POST | `/accounts/{id}/webhooks` | Create webhook |
-| GET | `/accounts/{id}/webhooks` | List webhooks |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│              Your VPS (Self-Hosted)             │
-├─────────────────────────────────────────────────┤
-│                                                  │
-│   ┌──────────────┐    ┌──────────────┐       │
-│   │   SMTP Server │    │  IMAP Server │       │
-│   │   (outbound)  │    │  (inbound)   │       │
-│   └───────┬───────┘    └───────┬───────┘       │
-│           │                    │                │
-│           └────────┬───────────┘                │
-│                    ▼                            │
-│           ┌───────────────┐                    │
-│           │  REST API     │                    │
-│           │  (port 8002)  │                    │
-│           └───────┬───────┘                    │
-│                   │                            │
-│    ┌──────────────┼──────────────┐            │
-│    ▼              ▼              ▼            │
-│ ┌──────┐   ┌──────────┐   ┌──────────┐     │
-│ │Memory│◀──│  Webhooks │──▶│   LLM    │     │
-│ │Bridge│   │           │   │  Auto-   │     │
-│ └──────┘   └──────────┘   │  Reply   │     │
-│                             └──────────┘     │
-└─────────────────────────────────────────────────┘
+agent-email/
+├── app/
+│   ├── main.py              # FastAPI application
+│   ├── db/
+│   │   ├── session.py       # Database connection
+│   │   └── models.py        # SQLAlchemy models
+│   ├── services/
+│   │   ├── policy_service.py   # Approval rules
+│   │   ├── audit_service.py    # Action logging
+│   │   ├── safety_service.py   # Inbound email safety
+│   │   └── transport_service.py # Email providers
+│   └── api/                 # Route handlers
+├── migrations/
+│   └── 001_init.sql        # v1 schema
+└── README.md
 ```
 
----
+## Key Changes from Prototype
 
-## Status
+### Old → New Mapping
 
-**Beta Ready** ✅
+| Old File | New Location |
+|----------|-------------|
+| `enhanced_client.py` | `app/services/transport_service.py` |
+| `memory_integration.py` | `app/providers/memory/` |
+| `webhook_manager.py` | `app/services/webhook_service.py` |
+| `llm_reply.py` | `app/services/reply_service.py` |
+| `api.py` | `app/main.py` |
+| In-memory `accounts` dict | `mailboxes` table |
+| File-based webhooks | `webhooks` table |
+| Direct send | `drafts` + `approvals` tables |
 
-Features implemented:
-- ✅ IMAP client
-- ✅ SMTP client
-- ✅ REST API
-- ✅ Python SDK
-- ✅ Multiple accounts
-- ✅ Send/receive emails
-- ✅ Memory integration
-- ✅ Webhooks
-- ✅ LLM auto-reply
+## API Overview
 
----
+### Organizations
+- `POST /organizations` - Create org
+- `GET /organizations/{id}` - Get org
 
-**License:** MIT
+### Agents
+- `POST /organizations/{org_id}/agents` - Create agent
+- `GET /organizations/{org_id}/agents/{id}` - Get agent
+
+### Mailboxes
+- `POST /organizations/{org_id}/mailboxes` - Add mailbox
+- `GET /organizations/{org_id}/mailboxes/{id}/messages` - List messages
+
+### Drafting (NEW - draft-by-default)
+- `POST .../mailboxes/{id}/drafts/generate` - Generate reply draft
+- `POST .../drafts/{id}/approve` - Approve draft
+- `POST .../drafts/{id}/reject` - Reject draft
+- `POST .../drafts/{id}/send` - Send approved draft
+
+### Webhooks
+- `POST /organizations/{org_id}/webhooks` - Create webhook
+- `GET /organizations/{org_id}/webhooks` - List webhooks
+
+### Audit
+- `GET /organizations/{org_id}/audit` - View action logs
+
+## Policy Rules (v1)
+
+Default hardcoded rules:
+1. **External recipients** → require approval
+2. **Low confidence (<0.7)** → require approval
+3. **Blocked senders** → blocked
+4. **Trusted senders** → auto-approved
+
+Custom policies can be added via the `policies` table.
+
+## Safety
+
+Inbound email is treated as hostile. The `SafetyService`:
+- Sanitizes HTML/scripts
+- Extracts and flags links
+- Quarantines dangerous attachments
+- Detects tool instruction attempts
+
+## Auth
+
+Supports both:
+- `x-api-key` header
+- `Authorization: Bearer <token>` header
+
+Tokens are stored as SHA256 hashes in the `api_tokens` table with scoped permissions.

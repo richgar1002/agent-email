@@ -647,6 +647,16 @@ async def get_webhook_logs(
 # === HEALTH ===
 
 @app.get("/health")
+
+@app.post("/webhooks/email/receive")
+async def receive_email_webhook(payload: dict = None):
+    import logging
+    logging.info(f"Received webhook: {payload}")
+    return {"status": "received"}
+
+@app.get("/webhooks/email/receive")
+async def webhook_health():
+    return {"status": "healthy"}
 async def health():
     """Health check"""
     return {
@@ -662,3 +672,20 @@ async def health():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8002)
+
+
+# Webhook endpoint for receiving emails
+@app.post("/webhooks/email/receive")
+async def receive_email_webhook(payload: dict = None):
+    """
+    Webhook endpoint for receiving incoming emails from Resend
+    """
+    import logging
+    logging.info(f"Received webhook: {payload}")
+    return {"status": "received"}
+
+
+@app.get("/webhooks/email/receive")
+async def webhook_health():
+    """Health check for webhook"""
+    return {"status": "healthy"}
